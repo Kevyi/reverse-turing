@@ -1,12 +1,17 @@
-// app/api/generate_responses/route.js
-import { Groq } from 'groq-sdk';
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+import { callGroq } from '@/lib/llms/groq';
+import { callGemini } from '@/lib/llms/gemini';
 
 export async function POST(req) {
-  const body = await req.json();
+  //Get message from request body
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
   const { message } = body;
 
   if (!message) {
@@ -17,25 +22,26 @@ export async function POST(req) {
   }
 
   try {
-    const completion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: message }],
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-      temperature: 1,
-      max_completion_tokens: 1024,
-      top_p: 1,
-      stream: false,
-    });
+    // Run both calls in parallel
+    const [groqResponse, geminiResponse] = await Promise.all([
+      callGroq(message),
+      callGemini(message),
+    ]);
 
-    const fullResponse = completion.choices[0]?.message?.content || '';
-
-    return new Response(JSON.stringify({ response: fullResponse }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch (error) {
-    console.error('Groq API error:', error);
     return new Response(
-      JSON.stringify({ error: 'Failed to fetch from Groq' }),
+      JSON.stringify({
+        groq: groqResponse,
+        gemini: geminiResponse,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  } catch (error) {
+    console.error('Error calling models:', error);
+    return new Response(
+      JSON.stringify({ error: 'Failed to get responses from models' }),
       {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
